@@ -1,32 +1,29 @@
-const { setWorldConstructor, Before, After } = require('@cucumber/cucumber');
+const { setWorldConstructor, Before, After, setDefaultTimeout } = require('@cucumber/cucumber');
 const { Builder } = require('selenium-webdriver');
 const firefox = require('selenium-webdriver/firefox');
+const chrome = require('selenium-webdriver/chrome');
+
+setDefaultTimeout(60 * 1000);
 
 class CustomWorld {
   constructor({ parameters }) {
     this.parameters = parameters;
-    this.clipboard = '';
-  }
-
-  async setDriver() {
-    const options = new firefox.Options();
-    options.addArguments('-headless'); // Ensure headless mode for CI
-
-    this.driver = await new Builder()
-      .forBrowser('firefox')
-      .setFirefoxOptions(options) // Apply the headless option here
-      .build();
-
-    await this.driver.manage().setTimeouts({
-      implicit: this.parameters.waitTimeout,
-    });
+    this.clipboard = {};
   }
 }
 
 setWorldConstructor(CustomWorld);
 
 Before(async function () {
-  await this.setDriver();
+  const browser = process.env.BROWSER || 'firefox';
+  const builder = new Builder().forBrowser(browser);
+  if (browser === 'chrome') {
+    builder.setChromeOptions(new chrome.Options().addArguments('--headless=new', '--window-size=1280,900'));
+  } else {
+    builder.setFirefoxOptions(new firefox.Options().addArguments('-headless'));
+  }
+  this.driver = await builder.build();
+  await this.driver.manage().setTimeouts({ implicit: 0 });
 });
 
 After(async function () {

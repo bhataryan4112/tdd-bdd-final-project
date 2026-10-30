@@ -1,5 +1,4 @@
 const { Product, Category } = require('../../src/models/product');
-const { sequelize } = require('../../src/database/connection');
 const { ProductFactory } = require('../factories');
 
 describe('Product Model', () => {
@@ -54,9 +53,68 @@ describe('Product Model', () => {
     });
   });
   
-  //
-  // ADD YOUR TEST CASES HERE
-  //
+  test('READ: finds a saved product by ID', async () => {
+    const original = await ProductFactory.create();
+    const found = await Product.findByPk(original.id);
+    expect(found.serialize()).toEqual(original.serialize());
+    expect(await Product.findByPk(original.id + 1000)).toBeNull();
+  });
+
+  test('UPDATE: persists changed product fields', async () => {
+    const product = await ProductFactory.create();
+    const changes = ProductFactory.build({ name: 'Updated Hat', available: false });
+    await product.update(changes);
+    const found = await Product.findByPk(product.id);
+    expect(found.serialize()).toEqual({ id: product.id, ...changes });
+    expect(await Product.count()).toBe(1);
+  });
+
+  test('DELETE: removes only the selected product', async () => {
+    const product = await ProductFactory.create();
+    const retained = await ProductFactory.create();
+    await product.destroy();
+    expect(await Product.findByPk(product.id)).toBeNull();
+    expect(await Product.findByPk(retained.id)).not.toBeNull();
+    expect(await Product.count()).toBe(1);
+  });
+
+  test('LIST ALL: returns every product and handles an empty catalog', async () => {
+    expect(await Product.findAll()).toEqual([]);
+    const products = await Promise.all([
+      ProductFactory.create(), ProductFactory.create(), ProductFactory.create()
+    ]);
+    const found = await Product.findAll();
+    expect(found.map(product => product.id).sort()).toEqual(
+      products.map(product => product.id).sort()
+    );
+  });
+
+  test('FIND BY NAME: returns all exact matches', async () => {
+    const first = await ProductFactory.create({ name: 'Hat' });
+    const second = await ProductFactory.create({ name: 'Hat' });
+    await ProductFactory.create({ name: 'Shoes' });
+    const found = await Product.findByName('Hat');
+    expect(found.map(product => product.id).sort()).toEqual([first.id, second.id].sort());
+    expect(await Product.findByName('Missing')).toEqual([]);
+  });
+
+  test('FIND BY CATEGORY: excludes products in other categories', async () => {
+    const first = await ProductFactory.create({ category: Category.CLOTHS });
+    const second = await ProductFactory.create({ category: Category.CLOTHS });
+    await ProductFactory.create({ category: Category.FOOD });
+    const found = await Product.findByCategory(Category.CLOTHS);
+    expect(found.map(product => product.id).sort()).toEqual([first.id, second.id].sort());
+    expect(await Product.findByCategory(Category.TOOLS)).toEqual([]);
+  });
+
+  test('FIND BY AVAILABILITY: supports both true and false', async () => {
+    const available = await ProductFactory.create({ available: true });
+    const unavailable = await ProductFactory.create({ available: false });
+    expect((await Product.findByAvailability(true)).map(product => product.id))
+      .toEqual([available.id]);
+    expect((await Product.findByAvailability(false)).map(product => product.id))
+      .toEqual([unavailable.id]);
+  });
 
   
   
