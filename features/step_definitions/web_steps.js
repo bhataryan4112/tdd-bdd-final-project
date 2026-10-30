@@ -1,112 +1,121 @@
-const { When, Then, BeforeAll, AfterAll, setDefaultTimeout } = require('@cucumber/cucumber');
-const { Builder, By, Key, until, Select } = require('selenium-webdriver');
-const firefox = require('selenium-webdriver/firefox');
+const { When, Then } = require('@cucumber/cucumber');
+const { By, until, Select } = require('selenium-webdriver');
 const assert = require('assert');
 
-const BASE_URL = 'http://localhost:8080';
-
-let driver;
-
-// Set default timeout for asynchronous steps to 60 seconds
-setDefaultTimeout(60 * 1000);
-
-BeforeAll(async function () {
-  const options = new firefox.Options();
-  options.addArguments('-headless');
-
-  driver = await new Builder()
-    .forBrowser('firefox')
-    .setFirefoxOptions(options)
-    .build();
-});
-
-AfterAll(async function () {
-  if (driver) {
-    await driver.quit();
-  }
-});
-
-// Helper function to get a form field by its ID
-async function getField(fieldName) {
-  const elementId = 'product_' + fieldName.toLowerCase().replace(/ /g, '_');
-  return driver.findElement(By.id(elementId));
-}
-
-
-
-// Helper function to get a button by its ID
-async function getButton(buttonText) {
-  const buttonId = buttonText.toLowerCase() + '-btn';
-  return driver.findElement(By.id(buttonId));
+function getField(world, fieldName) {
+  return world.driver.findElement(By.id('product_' + fieldName.toLowerCase().replace(/ /g, '_')));
 }
 
 When('I visit the {string}', async function (pageName) {
-  await driver.get(BASE_URL + '/');
+  assert.strictEqual(pageName, 'Home Page');
+  await this.driver.get(`${this.parameters.baseUrl}/`);
 });
 
 Then('I should see {string} in the title', async function (expectedTitle) {
-  const actualTitle = await driver.getTitle();
-  assert.strictEqual(actualTitle.includes(expectedTitle), true, `Expected title to include "${expectedTitle}", but got "${actualTitle}"`);
-});
-
-Then('I should not see {string}', async function (text) {
-  const pageSource = await driver.getPageSource();
-  assert.strictEqual(pageSource.includes(text), false, `Expected not to see "${text}" on the page`);
+  await this.driver.wait(until.titleContains(expectedTitle), this.parameters.waitTimeout);
 });
 
 When('I set the {string} to {string}', async function (fieldName, value) {
-  const field = await getField(fieldName);
+  const field = await getField(this, fieldName);
   await field.clear();
   await field.sendKeys(value);
 });
 
 When('I select {string} in the {string} dropdown', async function (value, dropdownName) {
-  const dropdownElement = await getField(dropdownName);
-  const select = new Select(dropdownElement);
-  await select.selectByVisibleText(value);
+  const dropdown = await getField(this, dropdownName);
+  await new Select(dropdown).selectByVisibleText(value);
 });
 
+When('I press the {string} button', async function (buttonText) {
+  const button = await this.driver.findElement(By.id(buttonText.toLowerCase() + '-btn'));
+  await this.driver.wait(until.elementIsVisible(button), this.parameters.waitTimeout);
+  // Every API action clears the old flash message before issuing its request.
+  await this.driver.executeScript("document.getElementById('flash_message').textContent = ''; ");
+  await button.click();
+  if (buttonText.toLowerCase() !== 'clear') {
+    await this.driver.wait(async () => {
+      const message = await this.driver.findElement(By.id('flash_message')).getText();
+      return message.trim().length > 0;
+    }, this.parameters.waitTimeout, `No response after clicking ${buttonText}`);
+  }
+});
 
+Then('I should see {string}', async function (text) {
+  await this.driver.wait(async () => {
+    const body = await this.driver.findElement(By.css('body')).getText();
+    return body.includes(text);
+  }, this.parameters.waitTimeout, `Expected to see "${text}"`);
+});
+
+Then('I should not see {string}', async function (text) {
+  await this.driver.wait(async () => {
+    const body = await this.driver.findElement(By.css('body')).getText();
+    return !body.includes(text);
+  }, this.parameters.waitTimeout, `Expected not to see "${text}"`);
+});
+
+Then('I should see the message {string}', async function (expectedMessage) {
+  await this.driver.wait(async () => {
+    const message = await this.driver.findElement(By.id('flash_message')).getText();
+    return message.includes(expectedMessage);
+  }, this.parameters.waitTimeout, `Expected message "${expectedMessage}"`);
+});
 
 When('I copy the {string} field', async function (fieldName) {
-  const field = await getField(fieldName);
-  this.copiedId = await field.getAttribute('value');
-  assert.ok(this.copiedId, `Could not copy value from field "${fieldName}"`);
+  const field = await getField(this, fieldName);
+  this.clipboard[fieldName] = await field.getAttribute('value');
+  assert.ok(this.clipboard[fieldName], `Cannot copy an empty ${fieldName} field`);
 });
 
 Then('the {string} field should be empty', async function (fieldName) {
-  const field = await getField(fieldName);
-  const value = await field.getAttribute('value');
-  assert.strictEqual(value, '', `Expected field "${fieldName}" to be empty, but it was "${value}"`);
+  const field = await getField(this, fieldName);
+  assert.strictEqual(await field.getAttribute('value'), '');
 });
 
 When('I paste the {string} field', async function (fieldName) {
-  assert.ok(this.copiedId, 'No ID was copied to paste.');
-  const field = await getField(fieldName);
+  assert.ok(this.clipboard[fieldName], `No copied ${fieldName} value`);
+  const field = await getField(this, fieldName);
   await field.clear();
-  await field.sendKeys(this.copiedId);
+  await field.sendKeys(this.clipboard[fieldName]);
 });
 
 Then('I should see {string} in the {string} field', async function (expectedValue, fieldName) {
-  const field = await getField(fieldName);
-  await driver.wait(until.elementIsVisible(field), 10000);
-  const actualValue = await field.getAttribute('value');
-  assert.strictEqual(actualValue, expectedValue, `Expected "${expectedValue}" in field "${fieldName}", but got "${actualValue}"`);
+  const field = await getField(this, fieldName);
+  await this.driver.wait(async () => (await field.getAttribute('value')) === expectedValue,
+    this.parameters.waitTimeout, `Expected ${expectedValue} in ${fieldName}`);
 });
 
 Then('I should see {string} in the {string} dropdown', async function (expectedValue, dropdownName) {
-  const dropdown = await getField(dropdownName);
-  const select = new Select(dropdown);
-  const selectedOption = await select.getFirstSelectedOption();
-  const actualValue = await selectedOption.getText();
-  assert.strictEqual(actualValue, expectedValue, `Expected "${expectedValue}" in dropdown "${dropdownName}", but got "${actualValue}"`);
+  const dropdown = await getField(this, dropdownName);
+  await this.driver.wait(async () => {
+    const option = await new Select(dropdown).getFirstSelectedOption();
+    return (await option.getText()) === expectedValue;
+  }, this.parameters.waitTimeout);
 });
 
 When('I change {string} to {string}', async function (fieldName, newValue) {
-  const field = await getField(fieldName);
+  const field = await getField(this, fieldName);
   await field.clear();
   await field.sendKeys(newValue);
 });
 
+Then('I should see {string} in the results', async function (text) {
+  const results = await this.driver.wait(
+    until.elementLocated(By.id('search_results')), this.parameters.waitTimeout
+  );
+  await this.driver.wait(
+    until.elementTextContains(results, text), this.parameters.waitTimeout
+  );
+  const resultsText = await results.getText();
+  assert.ok(resultsText.includes(text), `Expected to see "${text}" in search results`);
+});
 
-
+Then('I should not see {string} in the results', async function (text) {
+  const results = await this.driver.wait(
+    until.elementLocated(By.id('search_results')), this.parameters.waitTimeout
+  );
+  await this.driver.wait(async () => !(await results.getText()).includes(text),
+    this.parameters.waitTimeout);
+  const resultsText = await results.getText();
+  assert.ok(!resultsText.includes(text), `Expected not to see "${text}" in search results`);
+});

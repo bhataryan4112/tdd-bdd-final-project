@@ -1,3 +1,4 @@
+require('fs').mkdirSync('reports', { recursive: true });
 module.exports = {
     default: {
       require: [
