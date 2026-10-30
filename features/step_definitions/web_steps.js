@@ -98,3 +98,24 @@ When('I change {string} to {string}', async function (fieldName, newValue) {
   await field.clear();
   await field.sendKeys(newValue);
 });
+
+Then('I should see {string} in the results', async function (text) {
+  const results = await this.driver.wait(
+    until.elementLocated(By.id('search_results')), this.parameters.waitTimeout
+  );
+  await this.driver.wait(
+    until.elementTextContains(results, text), this.parameters.waitTimeout
+  );
+  const resultsText = await results.getText();
+  assert.ok(resultsText.includes(text), `Expected to see "${text}" in search results`);
+});
+
+Then('I should not see {string} in the results', async function (text) {
+  const results = await this.driver.wait(
+    until.elementLocated(By.id('search_results')), this.parameters.waitTimeout
+  );
+  await this.driver.wait(async () => !(await results.getText()).includes(text),
+    this.parameters.waitTimeout);
+  const resultsText = await results.getText();
+  assert.ok(!resultsText.includes(text), `Expected not to see "${text}" in search results`);
+});

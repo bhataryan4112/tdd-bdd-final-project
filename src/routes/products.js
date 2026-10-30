@@ -92,10 +92,14 @@ router.put('/:id(\\d+)', checkContentType('application/json'), validateProduct, 
   }
 });
 
-/** DELETE A PRODUCT: repeated deletes also return 204. */
+/** DELETE A PRODUCT */
 router.delete('/:id(\\d+)', async (req, res, next) => {
   try {
-    await Product.destroy({ where: { id: req.params.id } });
+    const product = await Product.findByPk(req.params.id);
+    if (!product) {
+      return res.status(404).json({ error: 'Not Found', message: `Product ${req.params.id} was not found` });
+    }
+    await product.destroy();
     return res.status(204).send();
   } catch (error) {
     next(error);

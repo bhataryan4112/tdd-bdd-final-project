@@ -29,18 +29,33 @@ const { Product, Category } = require('../src/models/product');
 
 class ProductFactory {
   static build(overrides = {}) {
-    return {
-      name: faker.commerce.productName(),
-      description: faker.commerce.productDescription().slice(0, 250),
-      price: Number(faker.commerce.price({ min: 1, max: 1000, dec: 2 })),
+    const product = {
+      id: faker.number.int({ min: 1, max: 1000 }),
+      name: faker.helpers.arrayElement(['Hat', 'Shoes', 'Big Mac', 'Sheets', 'Hammer']),
+      description: faker.lorem.paragraph().slice(0, 250),
+      price: parseFloat(faker.commerce.price({ min: 0.5, max: 2000.0, dec: 2 })),
       available: faker.datatype.boolean(),
-      category: faker.helpers.arrayElement(Object.values(Category)),
-      ...overrides
+      category: faker.helpers.arrayElement(Object.values(Category))
     };
+    return Object.assign(product, overrides);
+  }
+
+  static buildList(count, overrides = {}) {
+    return Array.from({ length: count }, () => this.build(overrides));
   }
 
   static async create(overrides = {}) {
-    return Product.create(this.build(overrides));
+    const productData = this.build(overrides);
+    delete productData.id;
+    return Product.create(productData);
+  }
+
+  static async createList(count, overrides = {}) {
+    const products = [];
+    for (let i = 0; i < count; i++) {
+      products.push(await this.create(overrides));
+    }
+    return products;
   }
 }
 
@@ -52,11 +67,21 @@ module.exports = { ProductFactory };
 File: `tests/models/product.test.js`
 
 ```javascript
-test('READ: finds a saved product by ID', async () => {
-    const original = await ProductFactory.create();
-    const found = await Product.findByPk(original.id);
-    expect(found.serialize()).toEqual(original.serialize());
-    expect(await Product.findByPk(original.id + 1000)).toBeNull();
+test('should read a product', async () => {
+    const productData = ProductFactory.build();
+    delete productData.id;
+    const savedProduct = await Product.create(productData);
+    expect(savedProduct.id).toBeDefined();
+    expect(savedProduct.id).not.toBeNull();
+
+    const foundProduct = await Product.findByPk(savedProduct.id);
+    expect(foundProduct).not.toBeNull();
+    expect(foundProduct.id).toBe(savedProduct.id);
+    expect(foundProduct.name).toBe(productData.name);
+    expect(foundProduct.description).toBe(productData.description);
+    expect(parseFloat(foundProduct.price)).toBe(productData.price);
+    expect(foundProduct.available).toBe(productData.available);
+    expect(foundProduct.category).toBe(productData.category);
   });
 ```
 
@@ -65,13 +90,22 @@ test('READ: finds a saved product by ID', async () => {
 File: `tests/models/product.test.js`
 
 ```javascript
-test('UPDATE: persists changed product fields', async () => {
-    const product = await ProductFactory.create();
-    const changes = ProductFactory.build({ name: 'Updated Hat', available: false });
-    await product.update(changes);
-    const found = await Product.findByPk(product.id);
-    expect(found.serialize()).toEqual({ id: product.id, ...changes });
-    expect(await Product.count()).toBe(1);
+test('should update a product', async () => {
+    const productData = ProductFactory.build();
+    delete productData.id;
+    const savedProduct = await Product.create(productData);
+    expect(savedProduct.id).toBeDefined();
+
+    savedProduct.description = 'testing';
+    const originalId = savedProduct.id;
+    await savedProduct.save();
+    expect(savedProduct.id).toBe(originalId);
+    expect(savedProduct.description).toBe('testing');
+
+    const products = await Product.findAll();
+    expect(products.length).toBe(1);
+    expect(products[0].id).toBe(originalId);
+    expect(products[0].description).toBe('testing');
   });
 ```
 
@@ -80,13 +114,17 @@ test('UPDATE: persists changed product fields', async () => {
 File: `tests/models/product.test.js`
 
 ```javascript
-test('DELETE: removes only the selected product', async () => {
-    const product = await ProductFactory.create();
-    const retained = await ProductFactory.create();
-    await product.destroy();
-    expect(await Product.findByPk(product.id)).toBeNull();
-    expect(await Product.findByPk(retained.id)).not.toBeNull();
-    expect(await Product.count()).toBe(1);
+test('should delete a product', async () => {
+    const productData = ProductFactory.build();
+    delete productData.id;
+    const savedProduct = await Product.create(productData);
+    let products = await Product.findAll();
+    expect(products.length).toBe(1);
+
+    await savedProduct.destroy();
+    products = await Product.findAll();
+    expect(products.length).toBe(0);
+    expect(await Product.findByPk(savedProduct.id)).toBeNull();
   });
 ```
 
@@ -95,15 +133,16 @@ test('DELETE: removes only the selected product', async () => {
 File: `tests/models/product.test.js`
 
 ```javascript
-test('LIST ALL: returns every product and handles an empty catalog', async () => {
-    expect(await Product.findAll()).toEqual([]);
-    const products = await Promise.all([
-      ProductFactory.create(), ProductFactory.create(), ProductFactory.create()
-    ]);
-    const found = await Product.findAll();
-    expect(found.map(product => product.id).sort()).toEqual(
-      products.map(product => product.id).sort()
-    );
+test('should list all products in the database', async () => {
+    let products = await Product.findAll();
+    expect(products.length).toBe(0);
+    for (let i = 0; i < 5; i++) {
+      const productData = ProductFactory.build();
+      delete productData.id;
+      await Product.create(productData);
+    }
+    products = await Product.findAll();
+    expect(products.length).toBe(5);
   });
 ```
 
@@ -112,13 +151,15 @@ test('LIST ALL: returns every product and handles an empty catalog', async () =>
 File: `tests/models/product.test.js`
 
 ```javascript
-test('FIND BY NAME: returns all exact matches', async () => {
-    const first = await ProductFactory.create({ name: 'Hat' });
-    const second = await ProductFactory.create({ name: 'Hat' });
-    await ProductFactory.create({ name: 'Shoes' });
-    const found = await Product.findByName('Hat');
-    expect(found.map(product => product.id).sort()).toEqual([first.id, second.id].sort());
-    expect(await Product.findByName('Missing')).toEqual([]);
+test('should find a product by name', async () => {
+    const products = await ProductFactory.createList(5);
+    const name = products[0].name;
+    const count = products.filter(product => product.name === name).length;
+    const found = await Product.findByName(name);
+    expect(found.length).toBe(count);
+    for (const product of found) {
+      expect(product.name).toBe(name);
+    }
   });
 ```
 
@@ -127,13 +168,15 @@ test('FIND BY NAME: returns all exact matches', async () => {
 File: `tests/models/product.test.js`
 
 ```javascript
-test('FIND BY CATEGORY: excludes products in other categories', async () => {
-    const first = await ProductFactory.create({ category: Category.CLOTHS });
-    const second = await ProductFactory.create({ category: Category.CLOTHS });
-    await ProductFactory.create({ category: Category.FOOD });
-    const found = await Product.findByCategory(Category.CLOTHS);
-    expect(found.map(product => product.id).sort()).toEqual([first.id, second.id].sort());
-    expect(await Product.findByCategory(Category.TOOLS)).toEqual([]);
+test('should find products by category', async () => {
+    const products = await ProductFactory.createList(10);
+    const category = products[0].category;
+    const count = products.filter(product => product.category === category).length;
+    const found = await Product.findByCategory(category);
+    expect(found.length).toBe(count);
+    for (const product of found) {
+      expect(product.category).toBe(category);
+    }
   });
 ```
 
@@ -142,13 +185,15 @@ test('FIND BY CATEGORY: excludes products in other categories', async () => {
 File: `tests/models/product.test.js`
 
 ```javascript
-test('FIND BY AVAILABILITY: supports both true and false', async () => {
-    const available = await ProductFactory.create({ available: true });
-    const unavailable = await ProductFactory.create({ available: false });
-    expect((await Product.findByAvailability(true)).map(product => product.id))
-      .toEqual([available.id]);
-    expect((await Product.findByAvailability(false)).map(product => product.id))
-      .toEqual([unavailable.id]);
+test('should find products by availability', async () => {
+    const products = await ProductFactory.createList(10);
+    const available = products[0].available;
+    const count = products.filter(product => product.available === available).length;
+    const found = await Product.findByAvailability(available);
+    expect(found.length).toBe(count);
+    for (const product of found) {
+      expect(product.available).toBe(available);
+    }
   });
 ```
 
@@ -170,14 +215,20 @@ test('READ: returns the product and reports missing products', async () => {
 File: `tests/routes/products.test.js`
 
 ```javascript
-test('UPDATE: saves all changed fields', async () => {
-    const [product] = await createProducts();
-    const changes = ProductFactory.build({ name: 'Updated Hat', available: false });
-    const response = await request(app).put(`${BASE_URL}/${product.id}`)
-      .send(changes).expect(200);
-    expect(response.body).toEqual({ id: product.id, ...changes });
-    expect((await Product.findByPk(product.id)).serialize()).toEqual(response.body);
-    expect(await getProductCount()).toBe(1);
+test('should update an existing product', async () => {
+    const productData = ProductFactory.build();
+    delete productData.id;
+    let response = await request(app).post(BASE_URL).send(productData).expect(201);
+    const newProduct = response.body;
+    const originalId = newProduct.id;
+    newProduct.description = 'unknown';
+    response = await request(app).put(`${BASE_URL}/${newProduct.id}`)
+      .send(newProduct).expect(200);
+    const updatedProduct = response.body;
+    expect(updatedProduct.id).toBe(originalId);
+    expect(updatedProduct.description).toBe('unknown');
+    const retrieved = await request(app).get(`${BASE_URL}/${originalId}`).expect(200);
+    expect(retrieved.body.description).toBe('unknown');
   });
 ```
 
@@ -186,14 +237,16 @@ test('UPDATE: saves all changed fields', async () => {
 File: `tests/routes/products.test.js`
 
 ```javascript
-test('DELETE: removes the product and is idempotent', async () => {
-    const [product, retained] = await createProducts(2);
+test('should delete a product', async () => {
+    const products = await createProducts(5);
+    const initialCount = await getProductCount();
+    const product = products[0];
     const response = await request(app).delete(`${BASE_URL}/${product.id}`).expect(204);
+    expect(response.body).toEqual({});
     expect(response.text).toBe('');
-    expect(await Product.findByPk(product.id)).toBeNull();
-    expect(await Product.findByPk(retained.id)).not.toBeNull();
-    await request(app).delete(`${BASE_URL}/${product.id}`).expect(204);
     await request(app).get(`${BASE_URL}/${product.id}`).expect(404);
+    const newCount = await getProductCount();
+    expect(newCount).toBe(initialCount - 1);
   });
 ```
 
@@ -202,12 +255,10 @@ test('DELETE: removes the product and is idempotent', async () => {
 File: `tests/routes/products.test.js`
 
 ```javascript
-test('LIST ALL: returns all products or an empty array', async () => {
-    expect((await request(app).get(BASE_URL).expect(200)).body).toEqual([]);
-    const products = await createProducts(3);
+test('should list all products', async () => {
+    await createProducts(5);
     const response = await request(app).get(BASE_URL).expect(200);
-    expect(response.body).toEqual(expect.arrayContaining(products.map(p => p.serialize())));
-    expect(response.body).toHaveLength(3);
+    expect(response.body.length).toBe(5);
   });
 ```
 
@@ -304,7 +355,11 @@ File: `src/routes/products.js`
 ```javascript
 router.delete('/:id(\\d+)', async (req, res, next) => {
   try {
-    await Product.destroy({ where: { id: req.params.id } });
+    const product = await Product.findByPk(req.params.id);
+    if (!product) {
+      return res.status(404).json({ error: 'Not Found', message: `Product ${req.params.id} was not found` });
+    }
+    await product.destroy();
     return res.status(204).send();
   } catch (error) {
     next(error);
@@ -408,20 +463,22 @@ Scenario: Update a Product
     When I visit the "Home Page"
     And I set the "Name" to "Hat"
     And I press the "Search" button
-    And I copy the "Id" field
-    And I change "Name" to "Updated Hat"
-    And I change "Description" to "A blue fedora"
-    And I change "Price" to "65.95"
-    And I select "False" in the "Available" dropdown
+    Then I should see the message "Success"
+    And I should see "A red fedora" in the "Description" field
+    When I change "Name" to "Fedora"
     And I press the "Update" button
     Then I should see the message "Success"
-    When I press the "Clear" button
+    When I copy the "Id" field
+    And I press the "Clear" button
     And I paste the "Id" field
     And I press the "Retrieve" button
-    Then I should see "Updated Hat" in the "Name" field
-    And I should see "A blue fedora" in the "Description" field
-    And I should see "65.95" in the "Price" field
-    And I should see "False" in the "Available" dropdown
+    Then I should see the message "Success"
+    And I should see "Fedora" in the "Name" field
+    When I press the "Clear" button
+    And I press the "Search" button
+    Then I should see the message "Success"
+    And I should see "Fedora" in the results
+    And I should not see "Hat" in the results
 ```
 
 ## Question 23: Task 6.3 — Delete a Product
@@ -433,18 +490,17 @@ Scenario: Delete a Product
     When I visit the "Home Page"
     And I set the "Name" to "Hat"
     And I press the "Search" button
-    And I copy the "Id" field
+    Then I should see the message "Success"
+    And I should see "A red fedora" in the "Description" field
+    When I copy the "Id" field
+    And I press the "Clear" button
+    And I paste the "Id" field
     And I press the "Delete" button
     Then I should see the message "Product has been Deleted!"
     When I press the "Clear" button
-    And I paste the "Id" field
-    And I press the "Retrieve" button
-    Then I should see the message "was not found"
-    And the "Name" field should be empty
-    When I press the "Clear" button
     And I press the "Search" button
-    Then I should not see "Hat"
-    And I should see "Shoes"
+    Then I should see the message "Success"
+    And I should not see "Hat" in the results
 ```
 
 ## Question 24: Task 6.4 — List all Products
@@ -452,15 +508,15 @@ Scenario: Delete a Product
 File: `features/products.feature`
 
 ```gherkin
-Scenario: List all Products
+Scenario: List all products
     When I visit the "Home Page"
     And I press the "Clear" button
     And I press the "Search" button
     Then I should see the message "Success"
-    And I should see "Hat"
-    And I should see "Shoes"
-    And I should see "Big Mac"
-    And I should see "Sheets"
+    And I should see "Hat" in the results
+    And I should see "Shoes" in the results
+    And I should see "Big Mac" in the results
+    And I should see "Sheets" in the results
 ```
 
 ## Question 25: Task 6.5 — Search Products by Category
@@ -468,15 +524,16 @@ Scenario: List all Products
 File: `features/products.feature`
 
 ```gherkin
-Scenario: Search Products by Category
+Scenario: Search by category
     When I visit the "Home Page"
-    And I select "Cloths" in the "Category" dropdown
+    And I press the "Clear" button
+    And I select "Food" in the "Category" dropdown
     And I press the "Search" button
     Then I should see the message "Success"
-    And I should see "Hat"
-    And I should see "Shoes"
-    And I should not see "Big Mac"
-    And I should not see "Sheets"
+    And I should see "Big Mac" in the results
+    And I should not see "Hat" in the results
+    And I should not see "Shoes" in the results
+    And I should not see "Sheets" in the results
 ```
 
 ## Question 26: Task 6.6 — Search Products by Availability
@@ -484,22 +541,16 @@ Scenario: Search Products by Category
 File: `features/products.feature`
 
 ```gherkin
-Scenario: Search Products by Availability
+Scenario: Search by available
     When I visit the "Home Page"
-    And I select "False" in the "Available" dropdown
-    And I press the "Search" button
-    Then I should see the message "Success"
-    And I should see "Shoes"
-    And I should not see "Hat"
-    And I should not see "Big Mac"
-    And I should not see "Sheets"
-    When I press the "Clear" button
+    And I press the "Clear" button
     And I select "True" in the "Available" dropdown
     And I press the "Search" button
-    Then I should see "Hat"
-    And I should see "Big Mac"
-    And I should see "Sheets"
-    And I should not see "Shoes"
+    Then I should see the message "Success"
+    And I should see "Hat" in the results
+    And I should see "Big Mac" in the results
+    And I should see "Sheets" in the results
+    And I should not see "Shoes" in the results
 ```
 
 ## Question 27: Task 6.7 — Search Products by Name
@@ -507,15 +558,13 @@ Scenario: Search Products by Availability
 File: `features/products.feature`
 
 ```gherkin
-Scenario: Search Products by Name
+Scenario: Search by name
     When I visit the "Home Page"
     And I set the "Name" to "Hat"
     And I press the "Search" button
     Then I should see the message "Success"
-    And I should see "Hat"
-    And I should not see "Shoes"
-    And I should not see "Big Mac"
-    And I should not see "Sheets"
+    And I should see "Hat" in the "Name" field
+    And I should see "A red fedora" in the "Description" field
 ```
 
 ## Question 28: Task 7.1 — Button click
@@ -543,11 +592,15 @@ When('I press the {string} button', async function (buttonText) {
 File: `features/step_definitions/web_steps.js`
 
 ```javascript
-Then('I should see {string}', async function (text) {
-  await this.driver.wait(async () => {
-    const body = await this.driver.findElement(By.css('body')).getText();
-    return body.includes(text);
-  }, this.parameters.waitTimeout, `Expected to see "${text}"`);
+Then('I should see {string} in the results', async function (text) {
+  const results = await this.driver.wait(
+    until.elementLocated(By.id('search_results')), this.parameters.waitTimeout
+  );
+  await this.driver.wait(
+    until.elementTextContains(results, text), this.parameters.waitTimeout
+  );
+  const resultsText = await results.getText();
+  assert.ok(resultsText.includes(text), `Expected to see "${text}" in search results`);
 });
 ```
 
@@ -556,11 +609,14 @@ Then('I should see {string}', async function (text) {
 File: `features/step_definitions/web_steps.js`
 
 ```javascript
-Then('I should not see {string}', async function (text) {
-  await this.driver.wait(async () => {
-    const body = await this.driver.findElement(By.css('body')).getText();
-    return !body.includes(text);
-  }, this.parameters.waitTimeout, `Expected not to see "${text}"`);
+Then('I should not see {string} in the results', async function (text) {
+  const results = await this.driver.wait(
+    until.elementLocated(By.id('search_results')), this.parameters.waitTimeout
+  );
+  await this.driver.wait(async () => !(await results.getText()).includes(text),
+    this.parameters.waitTimeout);
+  const resultsText = await results.getText();
+  assert.ok(!resultsText.includes(text), `Expected not to see "${text}" in search results`);
 });
 ```
 

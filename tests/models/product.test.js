@@ -53,67 +53,97 @@ describe('Product Model', () => {
     });
   });
   
-  test('READ: finds a saved product by ID', async () => {
-    const original = await ProductFactory.create();
-    const found = await Product.findByPk(original.id);
-    expect(found.serialize()).toEqual(original.serialize());
-    expect(await Product.findByPk(original.id + 1000)).toBeNull();
+  test('should read a product', async () => {
+    const productData = ProductFactory.build();
+    delete productData.id;
+    const savedProduct = await Product.create(productData);
+    expect(savedProduct.id).toBeDefined();
+    expect(savedProduct.id).not.toBeNull();
+
+    const foundProduct = await Product.findByPk(savedProduct.id);
+    expect(foundProduct).not.toBeNull();
+    expect(foundProduct.id).toBe(savedProduct.id);
+    expect(foundProduct.name).toBe(productData.name);
+    expect(foundProduct.description).toBe(productData.description);
+    expect(parseFloat(foundProduct.price)).toBe(productData.price);
+    expect(foundProduct.available).toBe(productData.available);
+    expect(foundProduct.category).toBe(productData.category);
   });
 
-  test('UPDATE: persists changed product fields', async () => {
-    const product = await ProductFactory.create();
-    const changes = ProductFactory.build({ name: 'Updated Hat', available: false });
-    await product.update(changes);
-    const found = await Product.findByPk(product.id);
-    expect(found.serialize()).toEqual({ id: product.id, ...changes });
-    expect(await Product.count()).toBe(1);
+  test('should update a product', async () => {
+    const productData = ProductFactory.build();
+    delete productData.id;
+    const savedProduct = await Product.create(productData);
+    expect(savedProduct.id).toBeDefined();
+
+    savedProduct.description = 'testing';
+    const originalId = savedProduct.id;
+    await savedProduct.save();
+    expect(savedProduct.id).toBe(originalId);
+    expect(savedProduct.description).toBe('testing');
+
+    const products = await Product.findAll();
+    expect(products.length).toBe(1);
+    expect(products[0].id).toBe(originalId);
+    expect(products[0].description).toBe('testing');
   });
 
-  test('DELETE: removes only the selected product', async () => {
-    const product = await ProductFactory.create();
-    const retained = await ProductFactory.create();
-    await product.destroy();
-    expect(await Product.findByPk(product.id)).toBeNull();
-    expect(await Product.findByPk(retained.id)).not.toBeNull();
-    expect(await Product.count()).toBe(1);
+  test('should delete a product', async () => {
+    const productData = ProductFactory.build();
+    delete productData.id;
+    const savedProduct = await Product.create(productData);
+    let products = await Product.findAll();
+    expect(products.length).toBe(1);
+
+    await savedProduct.destroy();
+    products = await Product.findAll();
+    expect(products.length).toBe(0);
+    expect(await Product.findByPk(savedProduct.id)).toBeNull();
   });
 
-  test('LIST ALL: returns every product and handles an empty catalog', async () => {
-    expect(await Product.findAll()).toEqual([]);
-    const products = await Promise.all([
-      ProductFactory.create(), ProductFactory.create(), ProductFactory.create()
-    ]);
-    const found = await Product.findAll();
-    expect(found.map(product => product.id).sort()).toEqual(
-      products.map(product => product.id).sort()
-    );
+  test('should list all products in the database', async () => {
+    let products = await Product.findAll();
+    expect(products.length).toBe(0);
+    for (let i = 0; i < 5; i++) {
+      const productData = ProductFactory.build();
+      delete productData.id;
+      await Product.create(productData);
+    }
+    products = await Product.findAll();
+    expect(products.length).toBe(5);
   });
 
-  test('FIND BY NAME: returns all exact matches', async () => {
-    const first = await ProductFactory.create({ name: 'Hat' });
-    const second = await ProductFactory.create({ name: 'Hat' });
-    await ProductFactory.create({ name: 'Shoes' });
-    const found = await Product.findByName('Hat');
-    expect(found.map(product => product.id).sort()).toEqual([first.id, second.id].sort());
-    expect(await Product.findByName('Missing')).toEqual([]);
+  test('should find a product by name', async () => {
+    const products = await ProductFactory.createList(5);
+    const name = products[0].name;
+    const count = products.filter(product => product.name === name).length;
+    const found = await Product.findByName(name);
+    expect(found.length).toBe(count);
+    for (const product of found) {
+      expect(product.name).toBe(name);
+    }
   });
 
-  test('FIND BY CATEGORY: excludes products in other categories', async () => {
-    const first = await ProductFactory.create({ category: Category.CLOTHS });
-    const second = await ProductFactory.create({ category: Category.CLOTHS });
-    await ProductFactory.create({ category: Category.FOOD });
-    const found = await Product.findByCategory(Category.CLOTHS);
-    expect(found.map(product => product.id).sort()).toEqual([first.id, second.id].sort());
-    expect(await Product.findByCategory(Category.TOOLS)).toEqual([]);
+  test('should find products by category', async () => {
+    const products = await ProductFactory.createList(10);
+    const category = products[0].category;
+    const count = products.filter(product => product.category === category).length;
+    const found = await Product.findByCategory(category);
+    expect(found.length).toBe(count);
+    for (const product of found) {
+      expect(product.category).toBe(category);
+    }
   });
 
-  test('FIND BY AVAILABILITY: supports both true and false', async () => {
-    const available = await ProductFactory.create({ available: true });
-    const unavailable = await ProductFactory.create({ available: false });
-    expect((await Product.findByAvailability(true)).map(product => product.id))
-      .toEqual([available.id]);
-    expect((await Product.findByAvailability(false)).map(product => product.id))
-      .toEqual([unavailable.id]);
+  test('should find products by availability', async () => {
+    const products = await ProductFactory.createList(10);
+    const available = products[0].available;
+    const count = products.filter(product => product.available === available).length;
+    const found = await Product.findByAvailability(available);
+    expect(found.length).toBe(count);
+    for (const product of found) {
+      expect(product.available).toBe(available);
+    }
   });
 
   

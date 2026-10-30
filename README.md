@@ -47,7 +47,7 @@ BROWSER=chrome npm run bdd -- --format summary
 | POST | `/api/products` | Create a validated product; 201 and Location header |
 | GET | `/api/products/:id` | Read a product; 200 or 404 |
 | PUT | `/api/products/:id` | Replace product fields; 200 or 404 |
-| DELETE | `/api/products/:id` | Delete; 204, including repeated deletes |
+| DELETE | `/api/products/:id` | Delete an existing product; 204, or 404 if missing |
 | GET | `/api/products` | List all; 200 and an array |
 | GET | `/api/products?name=Hat` | Match an exact name |
 | GET | `/api/products?category=CLOTHS` | Match a category |
@@ -63,8 +63,8 @@ Search parameters can be combined. Availability accepts the strings `true` and `
 
 - Jest: 25 tests passed across 2 suites, using real PostgreSQL 17.
 - ESLint: passed.
-- Cucumber dry run: all 9 scenarios and 118 steps matched.
-- Full Selenium/Cucumber run: 9 scenarios and 118 steps passed with headless Chrome.
-- Statement coverage of model and routes: 89.55%.
+- Cucumber dry run: all 9 scenarios and 112 steps matched.
+- Full Selenium/Cucumber run: 9 scenarios and 112 steps passed with headless Chrome.
+- Statement coverage of model and routes: 88.57%.
 
 The verification used separate temporary databases for Jest and the UI service. Firefox remains supported by the configuration but was not exercised in this verification. These results are verification of the implementation, not a course grading result.

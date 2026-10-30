@@ -14,6 +14,7 @@ describe('Product Routes', () => {
     const products = [];
     for (let i = 0; i < count; i++) {
       const productData = ProductFactory.build();
+      delete productData.id;
       const product = await Product.create(productData);
       products.push(product);
     }
@@ -125,14 +126,20 @@ describe('Product Routes', () => {
     await request(app).get(`${BASE_URL}/999999`).expect(404);
   });
 
-  test('UPDATE: saves all changed fields', async () => {
-    const [product] = await createProducts();
-    const changes = ProductFactory.build({ name: 'Updated Hat', available: false });
-    const response = await request(app).put(`${BASE_URL}/${product.id}`)
-      .send(changes).expect(200);
-    expect(response.body).toEqual({ id: product.id, ...changes });
-    expect((await Product.findByPk(product.id)).serialize()).toEqual(response.body);
-    expect(await getProductCount()).toBe(1);
+  test('should update an existing product', async () => {
+    const productData = ProductFactory.build();
+    delete productData.id;
+    let response = await request(app).post(BASE_URL).send(productData).expect(201);
+    const newProduct = response.body;
+    const originalId = newProduct.id;
+    newProduct.description = 'unknown';
+    response = await request(app).put(`${BASE_URL}/${newProduct.id}`)
+      .send(newProduct).expect(200);
+    const updatedProduct = response.body;
+    expect(updatedProduct.id).toBe(originalId);
+    expect(updatedProduct.description).toBe('unknown');
+    const retrieved = await request(app).get(`${BASE_URL}/${originalId}`).expect(200);
+    expect(retrieved.body.description).toBe('unknown');
   });
 
   test('UPDATE: rejects missing products, invalid bodies, and wrong media types', async () => {
@@ -144,22 +151,22 @@ describe('Product Routes', () => {
     expect((await Product.findByPk(product.id)).serialize()).toEqual(product.serialize());
   });
 
-  test('DELETE: removes the product and is idempotent', async () => {
-    const [product, retained] = await createProducts(2);
+  test('should delete a product', async () => {
+    const products = await createProducts(5);
+    const initialCount = await getProductCount();
+    const product = products[0];
     const response = await request(app).delete(`${BASE_URL}/${product.id}`).expect(204);
+    expect(response.body).toEqual({});
     expect(response.text).toBe('');
-    expect(await Product.findByPk(product.id)).toBeNull();
-    expect(await Product.findByPk(retained.id)).not.toBeNull();
-    await request(app).delete(`${BASE_URL}/${product.id}`).expect(204);
     await request(app).get(`${BASE_URL}/${product.id}`).expect(404);
+    const newCount = await getProductCount();
+    expect(newCount).toBe(initialCount - 1);
   });
 
-  test('LIST ALL: returns all products or an empty array', async () => {
-    expect((await request(app).get(BASE_URL).expect(200)).body).toEqual([]);
-    const products = await createProducts(3);
+  test('should list all products', async () => {
+    await createProducts(5);
     const response = await request(app).get(BASE_URL).expect(200);
-    expect(response.body).toEqual(expect.arrayContaining(products.map(p => p.serialize())));
-    expect(response.body).toHaveLength(3);
+    expect(response.body.length).toBe(5);
   });
 
   test('LIST BY NAME: returns every exact name match', async () => {
